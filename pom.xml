@@ -6,7 +6,9 @@
 
     <groupId>hjw.dev</groupId>
     <artifactId>DAGFlow</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.0.1</version>
+
+
     <name>DAG Execution Framework</name>
     <description>A lightweight DAG execution framework supporting parallel task execution based on dependencies</description>
     <developers>
@@ -40,7 +42,8 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <version>${lombok.version}</version>
-            <scope>optional</scope>
+            <scope>provided</scope>
+            <optional>true</optional>
         </dependency>
         <!-- JUnit 5 单元测试 -->
         <dependency>
@@ -85,6 +88,7 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
+                    <release>17</release>
                     <source>${maven.compiler.source}</source>
                     <target>${maven.compiler.target}</target>
                     <encoding>${project.build.sourceEncoding}</encoding>
@@ -97,6 +101,7 @@
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
+
             </plugin>
 
             <!-- 源码打包插件（便于开源后他人查看源码） -->
@@ -121,6 +126,7 @@
                 <artifactId>maven-javadoc-plugin</artifactId>
                 <version>3.4.1</version>
                 <configuration>
+                    <source>17</source>
                     <doclint>none</doclint>
                     <charset>UTF-8</charset>
                     <encoding>UTF-8</encoding>
