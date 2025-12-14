@@ -5,7 +5,7 @@ package cn.hjw.dev.dagflow.processor;
  * DAG每个节点处理策略
  * @param <T>
  * @param <C>
- * @param <R>
+ * @param <V>
  */
 @FunctionalInterface
 public interface DAGNodeProcessor<T,C,V> {
