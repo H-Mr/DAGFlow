@@ -6,7 +6,7 @@
 
     <groupId>hjw.dev</groupId>
     <artifactId>DAGFlow</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>v0.0.1</version>
     <name>DAG Execution Framework</name>
     <description>A lightweight DAG execution framework supporting parallel task execution based on dependencies</description>
     <developers>
