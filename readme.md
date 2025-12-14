@@ -57,7 +57,7 @@ DAGFlow 的核心是 **BSP (Bulk Synchronous Parallel)** 模型的落地实现�
 ### Maven
 *将代码 clone 到本地并安装*：
 ```bash
-git clone [https://github.com/H-Mr/DAGFlow.git](https://github.com/H-Mr/DAGFlow.git)
+git clone https://github.com/H-Mr/DAGFlow.git
 cd DAGFlow
 mvn clean install
 ```
