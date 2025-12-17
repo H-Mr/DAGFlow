@@ -205,9 +205,45 @@ return new DAGEngine<>(config);
 ```
 #### 3. 复杂场景支持
 该实战案例还验证了 DAGFlow 处理复杂业务的能力：
-
+　　
 - Nested DAG (嵌套图): 在锁单流程中调用“营销试算”服务，而“营销试算”本身也是一个基于 DAGFlow 编排的独立图。
 
 - Transaction Management: 配合 Spring 的事务机制，在 TerminalStrategy 或最终 Node 中处理事务提交。
 
-🔗 相关项目: 关于该拼团系统的源码、详细业务架构图，请移步至演示仓库：[拼团交易平台](https://github.com/H-Mr/GroupBuyMall.git "GroupBuyPlatform")
+🔗 相关项目: 关于该拼团系统的源码、详细业务架构图，请移步至演示仓库：[拼团交易平台](https://github.com/H-Mr/group-buy-platform.git "GroupBuyPlatform")
+
+---
+
+## 🚀 Future Roadmap (演进规划)
+
+为了适应更复杂的业务场景（如风控决策树、动态规则编排），DAGFlow 计划在后续版本中进行架构升级，重点增强引擎的**动态性**与**可扩展性**。我们将从**数据协议**、**调度解耦**、**动态编排**三个维度进行重构。
+
+### 1. Evolved Architecture (演进后架构)
+
+为了打破 `DAGExecutor` 与 `ExecutionPlan` 的强耦合，将引入 **Iterator Pattern (迭代器模式)** 重构调度层，并标准化数据交互协议。
+
+![Evolved Architecture Topology](docs/images/evolved-architecture-topology.png)
+
+* **Decoupled Scheduler (调度解耦)**: `DAGExecutor` 不再持有静态的层级列表，而是通过 `PlanIterator` 动态获取任务。这意味着引擎可以轻松扩展支持 "优先级调度"、"流式调度" 等多种模式。
+* **Standardized Protocol (标准化协议)**:
+    * **FlowContext (Slot Model)**: 引入基于“槽位”的高速上下文，替代 `Map` 查找，提升高并发读写性能。
+    * **FlowResult (Stateful)**: 节点返回状态 (`SUCCESS`, `SKIP`, `SUSPEND`)，从而支持复杂的控制流。
+
+### 2. Dynamic Execution Flow (动态执行流)
+
+演进后的引擎将支持 **Runtime Pruning (运行时剪枝)** 和 **Feedback Mechanism (反馈机制)**，实现真正的动态图执行。
+
+![Evolved BSP Sequence](docs/images/evolved-bsp-sequence.png)
+
+* **Dynamic Fetch (动态拉取)**: 在 `Fetch` 阶段，迭代器根据当前 Context 动态计算边条件 (Edge Predicate)。如果不满足条件，后续依赖节点将被自动剪枝 (Pruning)，不再提交给线程池。
+* **Feedback Loop (反馈闭环)**: 节点执行结果会反馈给迭代器，迭代器据此决定是否跳过后续整个分支（例如：某节点返回 `SKIP`，其所有后继节点自动标记为 Dead）。
+
+### 3. Key Features (规划特性详情)
+
+* **Condition & Predicate**: 支持在定义边时绑定 `Predicate<Context>`，实现 "如果不满足某条件，则不执行该分支" 的逻辑。
+* **Event-Driven Trigger**: 从单纯的层级依赖进化为事件订阅模式，支持更灵活的异步编排。
+* **Observability**: 内置 OpenTelemetry 支持，为每个 Slot 读写和节点执行注入 Trace，实现全链路可视化。
+### 4. Observability (可观测性增强)
+* **Trace Integration**: 内置 OpenTelemetry 支持，为每个节点执行注入 `TraceID` 和 `SpanID`，实现全链路可视化追踪。
+* **Metrics**: 暴露 Prometheus 指标（节点耗时 TP99、层级等待时间、吞吐量），便于监控系统集成。
+
