@@ -1,6 +1,7 @@
 package cn.hjw.dev.dagflow.config;
 
 import cn.hjw.dev.dagflow.processor.DAGNodeProcessor;
+import cn.hjw.dev.dagflow.processor.NodeCondition;
 import cn.hjw.dev.dagflow.processor.TerminalStrategy;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -29,6 +30,9 @@ public class GraphConfig<T, R> {
     // 治理配置表
     private Map<String, NodeGovernance> governanceMap;
 
+    // 节点条件表
+    private Map<String, NodeCondition<T>> nodeConditionMap;
+
     // 终结策略
     private TerminalStrategy<T, R> terminalStrategy;
 
@@ -43,6 +47,7 @@ public class GraphConfig<T, R> {
         routeTable = new HashMap<>();
         nodeStrategyMap = new HashMap<>();
         governanceMap = new HashMap<>();
+        nodeConditionMap = new HashMap<>();
     }
 
     public GraphConfig(ExecutorService threadPool) {
@@ -71,7 +76,25 @@ public class GraphConfig<T, R> {
         return this;
     }
 
+    //  全参数注册 (含条件)
+    public GraphConfig<T, R> addNode(String nodeId, DAGNodeProcessor<T> processor,
+                                     NodeGovernance governance, NodeCondition<T> condition) {
+        this.nodeStrategyMap.put(nodeId, processor);
+        if (governance != null) {
+            this.governanceMap.put(nodeId, governance);
+        }
+        if (condition != null) {
+            this.nodeConditionMap.put(nodeId, condition);
+        }
+        return this;
+    }
+
+    // 获取条件
+    public NodeCondition<T> getNodeCondition(String nodeId) {
+        return nodeConditionMap.getOrDefault(nodeId,null);
+    }
+
     public NodeGovernance getGovernance(String nodeId) {
-        return governanceMap.get(nodeId);
+        return governanceMap.getOrDefault(nodeId,null);
     }
 }

@@ -3,6 +3,7 @@ package cn.hjw.dev.dagflow.compile;
 import cn.hjw.dev.dagflow.config.GraphConfig;
 import cn.hjw.dev.dagflow.config.NodeGovernance;
 import cn.hjw.dev.dagflow.processor.DAGNodeProcessor;
+import cn.hjw.dev.dagflow.processor.NodeCondition;
 import cn.hjw.dev.dagflow.processor.ResilientNodeProcessor;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -82,7 +83,8 @@ public class DAGCompiler {
                 allNodes,
                 nodeParentsMap,
                 wrappedProcessors,
-                config.getGovernanceMap()
+                config.getGovernanceMap(),
+                config.getNodeConditionMap()
         );
     }
 
@@ -102,6 +104,9 @@ public class DAGCompiler {
 
         // 治理配置
         private final Map<String, NodeGovernance> governances;
+
+        // 节点执行条件
+        private final Map<String, NodeCondition<T>> nodeConditions;
     }
 
 }

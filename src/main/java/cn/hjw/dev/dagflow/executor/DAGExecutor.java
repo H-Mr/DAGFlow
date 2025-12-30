@@ -6,8 +6,10 @@ import cn.hjw.dev.dagflow.config.NodeGovernance;
 import cn.hjw.dev.dagflow.exception.DAGRuntimeException;
 import cn.hjw.dev.dagflow.hook.FallbackStrategy;
 import cn.hjw.dev.dagflow.processor.DAGNodeProcessor;
+import cn.hjw.dev.dagflow.processor.NodeCondition;
 import cn.hjw.dev.dagflow.processor.TerminalStrategy;
 import cn.hjw.dev.dagflow.processor.UpstreamInput;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,21 +25,22 @@ public class DAGExecutor<T, R> {
     private final ExecutorService threadPool;
     private final TerminalStrategy<T, R> terminalStrategy;
     private final long globalTimeout;
+    private final GraphConfig<T,R> config;
 
     public DAGExecutor(DAGCompiler.ExecutionPlan<T> plan, GraphConfig<T, R> config) {
         this.plan = plan;
         this.threadPool = config.getThreadPool();
         this.terminalStrategy = config.getTerminalStrategy();
+        this.config = config;
         this.globalTimeout = config.getGlobalTimeoutMillis() != null ? config.getGlobalTimeoutMillis() : 60000L;
     }
 
     public R execute(T request) throws Exception {
         // 1. Future 注册表 (Memoization Cache)
-        Map<String, CompletableFuture<Object>> futureRegistry = new ConcurrentHashMap<>();
+        Map<String, CompletableFuture<NodeEntry>> futureRegistry = new ConcurrentHashMap<>();
 
-        // 2. 递归构建所有节点的 Future
-        // 但为了确保所有孤立节点也能运行，我们遍历所有节点。
-        List<CompletableFuture<Object>> allFutures = new ArrayList<>();
+        // 2. 递归构建
+        List<CompletableFuture<NodeEntry>> allFutures = new ArrayList<>();
         for (String nodeId : plan.getAllNodes()) {
             allFutures.add(getOrCreateFuture(nodeId, request, futureRegistry));
         }
@@ -65,16 +68,19 @@ public class DAGExecutor<T, R> {
             }
         }
 
-        // 4. 收集结果 (Execution Context)
+        // 4. 收集结果 (只收集 SUCCESS 的结果)
         Map<String, Object> results = new ConcurrentHashMap<>();
-        for (Map.Entry<String, CompletableFuture<Object>> entry : futureRegistry.entrySet()) {
+        for (Map.Entry<String, CompletableFuture<NodeEntry>> entry : futureRegistry.entrySet()) {
             String nodeId = entry.getKey();
-            CompletableFuture<Object> future = entry.getValue();
-            // 只有成功完成的任务才有结果；失败/被取消的任务没有结果
+            CompletableFuture<NodeEntry> future = entry.getValue();
+
             if (!future.isCompletedExceptionally() && !future.isCancelled()) {
-                Object val = future.getNow(null); // 安全获取，因为前面已经 get() 过了
-                if (val != null) {
-                    results.put(nodeId, val);
+                NodeEntry nodeEntry = future.getNow(null);
+                // 关键点：如果是 SKIPPED，不放入 results，对 TerminalStrategy 透明
+                if (nodeEntry != null && nodeEntry.getStatus() == NodeStatus.SUCCESS) {
+                    if (nodeEntry.getValue() != null) {
+                        results.put(nodeId, nodeEntry.getValue());
+                    }
                 }
             }
         }
@@ -84,16 +90,15 @@ public class DAGExecutor<T, R> {
     }
 
     // 递归构建 Future (核心算法)
-    private CompletableFuture<Object> getOrCreateFuture(String nodeId, T request,
-                                                        Map<String, CompletableFuture<Object>> registry) {
+    private CompletableFuture<NodeEntry> getOrCreateFuture(String nodeId, T request,
+                                                        Map<String, CompletableFuture<NodeEntry>> registry) {
         // Memoization
         if (registry.containsKey(nodeId)) {
             return registry.get(nodeId);
         }
 
-        // 1. 获取依赖 (Parents)
         List<String> parentIds = plan.getNodeParentsMap().get(nodeId);
-        List<CompletableFuture<Object>> parentFutures = new ArrayList<>();
+        List<CompletableFuture<NodeEntry>> parentFutures = new ArrayList<>();
         if (parentIds != null && !parentIds.isEmpty()) {
             for (String parentId : parentIds) {
                 parentFutures.add(getOrCreateFuture(parentId, request, registry));
@@ -101,52 +106,56 @@ public class DAGExecutor<T, R> {
         }
 
         // 2. 构建当前节点的 Future
-        CompletableFuture<Object> currentFuture;
+        CompletableFuture<NodeEntry> currentFuture;
 
-        if (parentFutures != null && ! parentFutures.isEmpty()) {
-            // 有依赖，等待所有 Parent 完成
+        if (parentFutures != null && !parentFutures.isEmpty()) {
             currentFuture = CompletableFuture.allOf(parentFutures.toArray(new CompletableFuture[0]))
                     .thenApplyAsync(v -> {
-                        // 构建输入：收集所有 Parent 的结果
+                        // 1. 检查父节点状态 (Cascade Skip)
                         Map<String, Object> parentResults = new ConcurrentHashMap<>();
                         for (int i = 0; i < parentIds.size(); i++) {
                             String pid = parentIds.get(i);
-                            CompletableFuture<Object> pf = parentFutures.get(i);
-                            // 注意：如果 Parent 异常，allOf 会抛异常，进不到这里。
-                            // 实现了级联失败 (Cascade Failure)。
-                            parentResults.put(pid, pf.join());
-                        }
-                        return executeNodeLogic(nodeId, request, parentResults);
-                    }, threadPool);
+                            NodeEntry pEntry = parentFutures.get(i).join(); // Safe join
 
+                            // 级联剪枝策略：严格模式 (Strict Mode)
+                            // 如果任意一个依赖的节点是 SKIPPED，则当前节点也 SKIP
+                            if (pEntry.getStatus() == NodeStatus.SKIPPED) {
+                                log.info("Node [{}] skipped because parent [{}] was skipped.", nodeId, pid);
+                                return NodeEntry.skipped();
+                            }
+                            if (pEntry.getValue() != null) {
+                                parentResults.put(pid, pEntry.getValue());
+                            }
+                        }
+
+                        // 2. 父节点都正常，执行核心逻辑
+                        return executeNodeLogicWithCondition(nodeId, request, parentResults);
+                    }, threadPool);
         } else {
-            // 无依赖，直接提交
-            currentFuture = CompletableFuture.supplyAsync(() -> executeNodeLogic(nodeId, request, Map.of()), threadPool);
+            // 无依赖
+            currentFuture = CompletableFuture.supplyAsync(
+                    () -> executeNodeLogicWithCondition(nodeId, request, Map.of()),
+                    threadPool
+            );
         }
 
-        // 3. 应用治理 (Timeout & Fallback)
+        // 3. 治理 (Timeout & Fallback)
         NodeGovernance governance = plan.getGovernances().get(nodeId);
         if (governance != null) {
-            // Node Timeout
             if (governance.getTimeout() > 0) {
                 currentFuture = currentFuture.orTimeout(governance.getTimeout(), governance.getTimeUnit());
             }
-            // Fallback (处理自身的异常 或 依赖失败导致的异常)
             if (governance.getFallbackStrategy() != null) {
                 currentFuture = currentFuture.exceptionally(ex -> {
-                    // 构建一个临时的 Input，此时可能只有部分上游数据，或者为空
-                    // 简便起见，Fallback 时的 input 可以是一个空的或者尽力而为的视图
-                    // 在此模型下，如果是因为上游失败触发的 exceptionally，我们很难拿到上游结果
-                    // 所以给 Fallback 传一个空的 Input 是合理的，或者只传 request
+                    // 注意：这里处理的是 Exception，不是 SKIPPED。SKIPPED 是正常结果。
                     UpstreamInput emptyInput = new SimpleUpstreamInput(Map.of());
-
-                    Throwable cause = extractRealCause(ex);
-                    log.warn("Node [{}] failed/timed-out, triggering fallback. Cause: {}", nodeId, cause.getMessage());
-
+                    Throwable cause = (ex instanceof CompletionException) ? ex.getCause() : ex;
+                    log.warn("Node [{}] failed, triggering fallback. Cause: {}", nodeId, cause.getMessage());
                     try {
-                        return ((FallbackStrategy<T>)governance.getFallbackStrategy()).fallback(request, emptyInput, cause);
+                        Object fbVal = ((FallbackStrategy<T>) governance.getFallbackStrategy()).fallback(request, emptyInput, cause);
+                        // 降级成功，视为 SUCCESS
+                        return NodeEntry.success(fbVal);
                     } catch (Exception fbEx) {
-                        log.error("Node [{}] fallback failed.", nodeId, fbEx);
                         throw new DAGRuntimeException("Fallback failed", fbEx);
                     }
                 });
@@ -158,15 +167,68 @@ public class DAGExecutor<T, R> {
         return currentFuture;
     }
 
-    // 执行节点具体的业务逻辑
-    private Object executeNodeLogic(String nodeId, T request, Map<String, Object> parentResults) {
+    /**
+     * 统一封装：条件检查 -> 业务执行
+     */
+    private NodeEntry executeNodeLogicWithCondition(String nodeId, T request, Map<String, Object> parentResults) {
+        // 1. 检查 NodeCondition
+        NodeCondition<T> condition = config.getNodeCondition(nodeId);
+        UpstreamInput input = new SimpleUpstreamInput(parentResults);
+        if (condition != null) {
+            boolean shouldRun;
+            try {
+                shouldRun = condition.evaluate(request, input);
+            } catch (Exception e) {
+                throw new DAGRuntimeException("Condition evaluation failed for node " + nodeId, e);
+            }
+
+            if (!shouldRun) {
+                log.info("Node [{}] condition evaluated to false -> SKIPPED.", nodeId);
+                return NodeEntry.skipped();
+            }
+        }
+
+        // 2. 执行业务逻辑
         try {
             DAGNodeProcessor<T> processor = plan.getProcessors().get(nodeId);
-            UpstreamInput input = new SimpleUpstreamInput(parentResults);
-            return processor.process(request, input);
+            Object result = processor.process(request, input);
+            return NodeEntry.success(result);
         } catch (Exception e) {
             throw new DAGRuntimeException("Node execution failed: " + nodeId, e);
         }
+    }
+
+    /**
+     * 递归剥离包装异常，获取最底层的业务异常
+     */
+    private Throwable extractRealCause(Throwable throwable) {
+        Throwable cause = throwable;
+        // 循环剥离 CompletionException, ExecutionException, DAGRuntimeException
+        while (cause != null && (
+                cause instanceof CompletionException ||
+                        cause instanceof ExecutionException ||
+                        cause instanceof DAGRuntimeException)) {
+
+            Throwable next = cause.getCause();
+            if (next == null) {
+                break; // 如果没有 cause 了，那当前这个就是最底层的
+            }
+            cause = next;
+        }
+        return cause;
+    }
+
+    // --- 内部状态封装 ---
+    private enum NodeStatus { SUCCESS, SKIPPED }
+
+    @Getter
+    @RequiredArgsConstructor
+    private static class NodeEntry {
+        private final Object value;
+        private final NodeStatus status;
+
+        static NodeEntry success(Object val) { return new NodeEntry(val, NodeStatus.SUCCESS); }
+        static NodeEntry skipped() { return new NodeEntry(null, NodeStatus.SKIPPED); }
     }
 
     // 内部类：UpstreamInput 实现
@@ -195,23 +257,4 @@ public class DAGExecutor<T, R> {
         }
     }
 
-    /**
-     * 递归剥离包装异常，获取最底层的业务异常
-     */
-    private Throwable extractRealCause(Throwable throwable) {
-        Throwable cause = throwable;
-        // 循环剥离 CompletionException, ExecutionException, DAGRuntimeException
-        while (cause != null && (
-                cause instanceof CompletionException ||
-                        cause instanceof ExecutionException ||
-                        cause instanceof DAGRuntimeException)) {
-
-            Throwable next = cause.getCause();
-            if (next == null) {
-                break; // 如果没有 cause 了，那当前这个就是最底层的
-            }
-            cause = next;
-        }
-        return cause;
-    }
 }
