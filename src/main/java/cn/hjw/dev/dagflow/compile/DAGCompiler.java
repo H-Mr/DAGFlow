@@ -1,83 +1,107 @@
 package cn.hjw.dev.dagflow.compile;
 
 import cn.hjw.dev.dagflow.config.GraphConfig;
+import cn.hjw.dev.dagflow.config.NodeGovernance;
 import cn.hjw.dev.dagflow.processor.DAGNodeProcessor;
+import cn.hjw.dev.dagflow.processor.ResilientNodeProcessor;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 
 import java.util.*;
+
+
 public class DAGCompiler {
+
     /**
-     * 将节点表和依赖关系编译成层级计划
-     * 算法：最长路径分层 (Longest Path Layering)
-     * 规则：Level(Node) = Max(Level(Predecessors)) + 1
+     * 编译图配置为执行计划
+     * @param config 图配置
+     * @param <T> 全局请求参数类型
+     * @param <R> 节点结果类型
+     * @return 执行计划
      */
-    public static <T,C,V,R> ExecutionPlan<T,C,V> compile(GraphConfig<T,C,V,R> graphConfig) { // Key: Parent, Value: Children
+    public static <T, R> ExecutionPlan<T> compile(GraphConfig<T, R> config) {
+        Map<String, List<String>> routeTable = config.getRouteTable(); // Parent -> Children
+        Set<String> allNodes = config.getNodeStrategyMap().keySet();
 
-        // 获取依赖关系图
-        Map<String, List<String>> routeTable = graphConfig.getRouteTable();
+        // 1. 环检测 (基于 Kahn 算法) & 构建反向依赖表 (Child -> Parents)
+        Map<String, List<String>> nodeParentsMap = new HashMap<>();
+        Map<String, Integer> inDegree = new HashMap<>();
+        allNodes.forEach(v -> {
+            nodeParentsMap.put(v, new ArrayList<>());
+            inDegree.put(v, 0);
+        });
 
-        // 获取节点处理器表
-        Map<String, DAGNodeProcessor<T,C, V>> processors = graphConfig.getNodeStrategyMap();
+        routeTable.forEach((node, children) -> {
+            if(!allNodes.contains(node)) return; // 忽略未注册的节点
+            if (children == null) return;
+            children.forEach(u -> {
+                if (!allNodes.contains(u)) return; // 忽略未注册的节点
+                nodeParentsMap.get(u).add(node); // 填充反向依赖
+                inDegree.merge(u, 1, Integer::sum);
+            });
+        });
 
-        // 计算入度表
-        Map<String, Integer> inDegree = generateInDegreeMap(routeTable,processors.keySet());
 
+        // 拓扑排序校验环
+        int count = 0;
+        Queue<String> queue = new ArrayDeque<>();
+        inDegree.forEach((k, v) -> {
+            if (v == 0) queue.offer(k);
+        });
 
-        // 2. 计算每个节点的层级 (Level)
-        Map<String, Integer> nodeLevels = new HashMap<>();
-        Queue<String> queue = new ArrayDeque<>(); // 拓扑排序队列
+        while (!queue.isEmpty()) {
+            String node = queue.poll();
+            count++;
+            List<String> children = routeTable.get(node);
+            if (children != null) {
+                for (String child : children) {
+                    inDegree.put(child, inDegree.get(child) - 1);
+                    if (inDegree.get(child) == 0) {
+                        queue.offer(child);
+                    }
+                }
+            }
+        }
 
-        // Level 0 节点入队
-        inDegree.forEach((node, deg) -> {
-            if (deg == 0) {
-                queue.offer(node);
-                nodeLevels.put(node, 0); // 所有入度为0的节点层级为0
+        if (count != allNodes.size()) {
+            throw new IllegalStateException("DAG cycle detected or disconnected nodes found!");
+        }
+
+        // 2. 包装处理器 (Governance Decorator)
+        Map<String, DAGNodeProcessor<T>> wrappedProcessors = new HashMap<>();
+        config.getNodeStrategyMap().forEach((id, processor) -> {
+            NodeGovernance governance = config.getGovernance(id);
+            if (governance != null && governance.getMaxRetries() > 0) {
+                wrappedProcessors.put(id, new ResilientNodeProcessor<>(id, processor, governance));
+            } else {
+                wrappedProcessors.put(id, processor);
             }
         });
-        int cnt = 0;
-        int maxLevel = 0;
-        while (!queue.isEmpty()) {
-          String currentNode = queue.poll();
-          cnt++;
-          int currentLevel = nodeLevels.get(currentNode);
-          maxLevel = Math.max(currentLevel,maxLevel);
-          List<String> children = routeTable.computeIfAbsent(currentNode, k ->Collections.emptyList());
-          for (String child : children) {
-              // 更新子节点的层级
-              nodeLevels.put(child, Math.max(nodeLevels.getOrDefault(child, 0), currentLevel + 1));
-              // 入度减1
-              inDegree.put(child, inDegree.get(child) - 1);
-              // 如果入度为0，加入队列,确定层级
-              if (inDegree.get(child) == 0) {
-                  queue.offer(child);
-              }
-          }
-        }
-        if (cnt != inDegree.size()) {
-            throw new IllegalStateException("DAG contains a cycle, topological sort not possible.");
-        }
 
-        // 3. 将 Map<Node, Level> 转换为 List<List<CompiledNode>>
-        List<List<CompiledNode<T,C, V>>> layers = new ArrayList<>();
-        for (int i = 0; i <= maxLevel; i++)
-            layers.add(new ArrayList<>());
-        // 将每个层级的结点归位到各自的层级集合中
-        nodeLevels.forEach((nodeId, level) ->
-            layers.get(level).add(new CompiledNode<>(nodeId, processors.get(nodeId)))
+        return new ExecutionPlan<>(
+                allNodes,
+                nodeParentsMap,
+                wrappedProcessors,
+                config.getGovernanceMap()
         );
-        return new ExecutionPlan<>(layers);
     }
 
-    private static Map<String,Integer> generateInDegreeMap(Map<String, List<String>> routeTable,Set<String> allNodes) {
-        Map<String, Integer> inDegree = new HashMap<>();
-        // 初始化所有节点的入度为0
-        allNodes.forEach(node -> inDegree.put(node, 0));
-        // 计算每个节点的入度
-        for (List<String> children : routeTable.values()) {
-            if (children != null) {
-                children.forEach(node -> inDegree.merge(node, 1, Integer::sum)); // 入度加1
-            }
-        }
-        return inDegree;
+    @Getter
+    @RequiredArgsConstructor
+    public static class ExecutionPlan<T> {
+
+        // 所有节点ID集合
+        private final Set<String> allNodes;
+
+        // 节点依赖关系: Key=NodeId, Value=List of Parent NodeIds
+        // 注意：GraphConfig 存的是 A->B (A是B的父)，这里我们要把它转成 B->[A] (方便B找爸爸)
+        private final Map<String, List<String>> nodeParentsMap;
+
+        // 经过 Resilient 包装后的处理器
+        private final Map<String, DAGNodeProcessor<T>> processors;
+
+        // 治理配置
+        private final Map<String, NodeGovernance> governances;
     }
 
 }

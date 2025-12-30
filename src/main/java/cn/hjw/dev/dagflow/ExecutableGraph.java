@@ -1,12 +1,11 @@
 package cn.hjw.dev.dagflow;
 
-public interface ExecutableGraph<T,C,R> {
+public interface ExecutableGraph<T, R> {
 
     /**
-     * 图的执行入口
-     * @param request
-     * @param context
-     * @return
+     * 执行图
+     * @param request 请求参数
+     * @return 执行结果
      */
-    R apply(T request, C context) throws Exception;
+    R apply(T request) throws Exception;
 }

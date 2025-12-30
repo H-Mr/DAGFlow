@@ -1,20 +1,18 @@
 package cn.hjw.dev.dagflow.processor;
 
-
 /**
- * DAG每个节点处理策略
- * @param <T>
- * @param <C>
- * @param <V>
+ * DAG节点处理器接口
+ * @param <T> 全局请求参数类型 (Request)
  */
 @FunctionalInterface
-public interface DAGNodeProcessor<T,C,V> {
+public interface DAGNodeProcessor<T> {
 
     /**
-     * DAG节点处理器
-     * @param requestParam 传入流程图的参数
-     * @param readonlyContext 只读上下文
-     * @return
+     * 执行节点逻辑
+     * @param request 全局请求参数
+     * @param input   上游输入访问器
+     * @return 节点计算结果 (由框架托管)
+     * @throws Exception 执行异常
      */
-    V process(T requestParam, final C readonlyContext) throws Exception;
+    Object process(T request, UpstreamInput input) throws Exception;
 }

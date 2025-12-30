@@ -6,7 +6,7 @@
 
     <groupId>hjw.dev</groupId>
     <artifactId>DAGFlow</artifactId>
-    <version>v0.0.1</version>
+    <version>0.0.1</version>
     <name>DAG Execution Framework</name>
     <description>A lightweight DAG execution framework supporting parallel task execution based on dependencies</description>
     <developers>
@@ -26,8 +26,8 @@
     </licenses>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>8</maven.compiler.source>
+        <maven.compiler.target>8</maven.compiler.target>
         <lombok.version>1.18.30</lombok.version>
         <junit.version>5.10.2</junit.version>
         <commons-lang3.version>3.12.0</commons-lang3.version>
@@ -40,7 +40,8 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <version>${lombok.version}</version>
-            <scope>optional</scope>
+            <scope>provided</scope>
+            <optional>true</optional>
         </dependency>
         <!-- JUnit 5 单元测试 -->
         <dependency>
@@ -83,11 +84,13 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
+                <version>3.8.1</version>
                 <configuration>
-                    <source>${maven.compiler.source}</source>
-                    <target>${maven.compiler.target}</target>
+                    <source>17</source>
+                    <target>17</target>
                     <encoding>${project.build.sourceEncoding}</encoding>
+                    <executable>D:\JAVA\jdk-17.0.12\bin\javac.exe</executable>
+                    <fork>true</fork>
                     <annotationProcessorPaths>
                         <!-- Lombok注解处理器 -->
                         <path>
