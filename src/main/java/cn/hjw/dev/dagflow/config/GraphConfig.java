@@ -74,7 +74,7 @@ public class GraphConfig<T, R> {
                 .timeUnit(TimeUnit.MILLISECONDS)
                 .maxRetries(0) // 默认不重试
                 .retryBackoff(0) // 不重试则不需要退避
-                .fallbackStrategy((r,ctx,ex) -> {throw new DAGRuntimeException("default fallback !",ex);})// 默认不降级，直接返回null
+                .fallbackStrategy(null)
                 .build();
     }
 
