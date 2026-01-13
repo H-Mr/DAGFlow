@@ -1,9 +1,9 @@
 package cn.hjw.dev.dagflow.compile;
 
+import cn.hjw.dev.dagflow.condition.EdgeCondition;
 import cn.hjw.dev.dagflow.config.GraphConfig;
-import cn.hjw.dev.dagflow.config.NodeGovernance;
+import cn.hjw.dev.dagflow.gov.NodeGovernance;
 import cn.hjw.dev.dagflow.processor.DAGNodeProcessor;
-import cn.hjw.dev.dagflow.processor.NodeCondition;
 import cn.hjw.dev.dagflow.processor.ResilientNodeProcessor;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -21,46 +21,35 @@ public class DAGCompiler {
      * @return 执行计划
      */
     public static <T, R> ExecutionPlan<T> compile(GraphConfig<T, R> config) {
-        Map<String, List<String>> routeTable = config.getRouteTable(); // Parent -> Children
-        Set<String> allNodes = config.getNodeStrategyMap().keySet();
+        Map<String, List<String>> routeTable = config.getRouteTable(); // 获取DAG的路由表
+        Set<String> allNodes = config.getNodeStrategyMap().keySet(); // 获取所有注册的节点ID
 
-        // 1. 环检测 (基于 Kahn 算法) & 构建反向依赖表 (Child -> Parents)
-        Map<String, List<String>> nodeParentsMap = new HashMap<>();
-        Map<String, Integer> inDegree = new HashMap<>();
-        allNodes.forEach(v -> {
-            nodeParentsMap.put(v, new ArrayList<>());
-            inDegree.put(v, 0);
-        });
-
-        routeTable.forEach((node, children) -> {
-            if(!allNodes.contains(node)) return; // 忽略未注册的节点
-            if (children == null) return;
+        // 1. 统计每个节点的入度 判断是否是合法的DAG
+        Map<String, Integer> inDegree = new HashMap<>(); // 入度表
+        allNodes.forEach(v -> inDegree.put(v, 0)); // 初始化入度为0,防止有一些孤立节点没有被统计到
+        routeTable.forEach((par, children) -> {
+            if(!allNodes.contains(par) || children == null) return; // 忽略未注册的节点
             children.forEach(u -> {
                 if (!allNodes.contains(u)) return; // 忽略未注册的节点
-                nodeParentsMap.get(u).add(node); // 填充反向依赖
                 inDegree.merge(u, 1, Integer::sum);
             });
         });
-
-
         // 拓扑排序校验环
         int count = 0;
         Queue<String> queue = new ArrayDeque<>();
         inDegree.forEach((k, v) -> {
             if (v == 0) queue.offer(k);
         });
-
         while (!queue.isEmpty()) {
             String node = queue.poll();
             count++;
             List<String> children = routeTable.get(node);
-            if (children != null) {
-                for (String child : children) {
-                    inDegree.put(child, inDegree.get(child) - 1);
-                    if (inDegree.get(child) == 0) {
-                        queue.offer(child);
-                    }
-                }
+            if (children == null)
+                continue;
+            for (String child : children) {
+                int in = inDegree.merge(child, -1, Integer::sum); // 入度减一
+                if (in == 0)
+                    queue.offer(child);
             }
         }
 
@@ -68,12 +57,23 @@ public class DAGCompiler {
             throw new IllegalStateException("DAG cycle detected or disconnected nodes found!");
         }
 
-        // 2. 包装处理器 (Governance Decorator)
+        // 2. 构建反向依赖表
+        Map<String, List<String>> nodeParentsMap = new HashMap<>();
+        routeTable.forEach((par, children) -> {
+            if(!allNodes.contains(par) || children == null) return; // 忽略未注册的节点
+            children.forEach(u -> {
+                if (!allNodes.contains(u)) return; // 忽略未注册的节点
+                nodeParentsMap.computeIfAbsent(u, k -> new ArrayList<>()).add(par);
+            });
+        });
+
+
+        // 2. 将节点的治理策略放到对应的处理器上
         Map<String, DAGNodeProcessor<T>> wrappedProcessors = new HashMap<>();
         config.getNodeStrategyMap().forEach((id, processor) -> {
-            NodeGovernance governance = config.getGovernance(id);
-            if (governance != null && governance.getMaxRetries() > 0) {
-                wrappedProcessors.put(id, new ResilientNodeProcessor<>(id, processor, governance));
+            NodeGovernance gov = config.getGovernance(id);
+            if (gov != null && gov.getMaxRetries() > 0) {
+                wrappedProcessors.put(id, new ResilientNodeProcessor<>(id, processor, gov));
             } else {
                 wrappedProcessors.put(id, processor);
             }
@@ -84,7 +84,7 @@ public class DAGCompiler {
                 nodeParentsMap,
                 wrappedProcessors,
                 config.getGovernanceMap(),
-                config.getNodeConditionMap()
+                config.getEdgeConditionMap()
         );
     }
 
@@ -106,7 +106,7 @@ public class DAGCompiler {
         private final Map<String, NodeGovernance> governances;
 
         // 节点执行条件
-        private final Map<String, NodeCondition<T>> nodeConditions;
+        private final Map<String, EdgeCondition<T>> edgeConditions;
     }
 
 }

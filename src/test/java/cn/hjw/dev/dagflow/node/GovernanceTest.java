@@ -1,7 +1,7 @@
 package cn.hjw.dev.dagflow.node;
 
 import cn.hjw.dev.dagflow.config.GraphConfig;
-import cn.hjw.dev.dagflow.config.NodeGovernance;
+import cn.hjw.dev.dagflow.gov.NodeGovernance;
 import cn.hjw.dev.dagflow.engine.DAGEngine;
 import cn.hjw.dev.dagflow.hook.FallbackStrategy;
 import cn.hjw.dev.dagflow.processor.DAGNodeProcessor;

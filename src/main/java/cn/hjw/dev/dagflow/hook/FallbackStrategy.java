@@ -1,9 +1,9 @@
 package cn.hjw.dev.dagflow.hook;
 
-import cn.hjw.dev.dagflow.processor.UpstreamInput;
+import cn.hjw.dev.dagflow.ctx.UpstreamInput;
 
 /**
- * 降级策略接口
+ * 降级策略接口，当一个节点执行失败时触发
  * @param <T> 请求类型
  */
 @FunctionalInterface

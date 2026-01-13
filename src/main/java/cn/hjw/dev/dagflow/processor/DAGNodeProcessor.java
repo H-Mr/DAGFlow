@@ -1,5 +1,7 @@
 package cn.hjw.dev.dagflow.processor;
 
+import cn.hjw.dev.dagflow.ctx.UpstreamInput;
+
 /**
  * DAG节点处理器接口
  * @param <T> 全局请求参数类型 (Request)

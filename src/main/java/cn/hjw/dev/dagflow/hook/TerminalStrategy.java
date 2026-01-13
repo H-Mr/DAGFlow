@@ -1,9 +1,9 @@
-package cn.hjw.dev.dagflow.processor;
+package cn.hjw.dev.dagflow.hook;
 
 import java.util.Map;
 
 /**
- * 终结策略：决定最终返回值
+ * 定义DAG执行结束后如何返回
  * @param <T> 请求类型
  * @param <R> 最终返回类型
  */

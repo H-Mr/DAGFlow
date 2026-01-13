@@ -3,7 +3,6 @@ package cn.hjw.dev.dagflow;
 import cn.hjw.dev.dagflow.config.GraphConfig;
 import cn.hjw.dev.dagflow.engine.DAGEngine;
 import cn.hjw.dev.dagflow.processor.DAGNodeProcessor;
-import cn.hjw.dev.dagflow.processor.NodeCondition;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;

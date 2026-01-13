@@ -1,5 +1,11 @@
 package cn.hjw.dev.dagflow;
 
+/**
+ * T 输入图的请求
+ * R 输出图的结果
+ * @param <T>
+ * @param <R>
+ */
 public interface ExecutableGraph<T, R> {
 
     /**
