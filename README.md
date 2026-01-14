@@ -210,4 +210,4 @@ return new DAGEngine<>(config);
 
 - Transaction Management: 配合 Spring 的事务机制，在 TerminalStrategy 或最终 Node 中处理事务提交。
 
-🔗 相关项目: 关于该拼团系统的源码、详细业务架构图，请移步至演示仓库：[拼团交易平台](https://github.com/H-Mr/GroupBuyMall.git "GroupBuyPlatform")
+🔗 相关项目: 关于该拼团系统的源码、详细业务架构图，请移步至演示仓库：[拼团交易平台]([https://github.com/H-Mr/GroupBuyMall.git "GroupBuyPlatform"](https://github.com/H-Mr/group-buy-platform))
